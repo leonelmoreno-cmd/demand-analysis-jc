@@ -1,0 +1,8 @@
+urllib3<2
+streamlit
+pytrends
+statsmodels
+plotly>=4
+pandas
+numpy
+packaging
