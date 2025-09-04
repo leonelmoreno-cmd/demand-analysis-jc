@@ -36,6 +36,7 @@ import plotly.express as px
 # ---------- Streamlit basic setup ----------
 st.set_page_config(page_title="Demand Analysis JC", layout="wide")
 st.title("Demand Analysis JC")
+st.subheader("Developed by Leonel Moreno")
 st.caption("Google Trends (US, last 5y, en-US) → STL (LOESS) → Plotly")
 
 # ---------- UI inputs ----------
