@@ -1,8 +1,8 @@
 # prophet_model.py
 
 import pandas as pd
-from fbprophet import Prophet
-from fbprophet.make_holidays import make_holidays_df
+from prophet import Prophet  # Cambiado de 'fbprophet' a 'prophet'
+from prophet.make_holidays import make_holidays_df  # Cambiado de 'fbprophet' a 'prophet'
 import plotly.graph_objects as go
 
 def run_prophet_model(df: pd.DataFrame, series_name: str, months_ahead: int = 6):
