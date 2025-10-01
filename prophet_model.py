@@ -1,5 +1,3 @@
-# prophet_model.py
-
 import pandas as pd
 from prophet import Prophet  # Cambiado de 'fbprophet' a 'prophet'
 from prophet.make_holidays import make_holidays_df  # Cambiado de 'fbprophet' a 'prophet'
@@ -7,7 +5,7 @@ import plotly.graph_objects as go
 
 def run_prophet_model(df: pd.DataFrame, series_name: str, months_ahead: int = 6):
     """
-    Run Prophets model with holidays added for USA and forecast for the next 'months_ahead' months.
+    Run Prophet model with holidays added for USA and forecast for the next 'months_ahead' months.
     """
     # Find the column name that represents the date, it could be 'date', 'Week', 'fecha', etc.
     date_column = None
@@ -46,3 +44,27 @@ def run_prophet_model(df: pd.DataFrame, series_name: str, months_ahead: int = 6)
     fig.update_layout(title=f"Prophet Forecast — {series_name}", xaxis_title="Date", yaxis_title="Trend Value")
 
     return forecast, fig
+
+def run_prophet_forecast(df: pd.DataFrame, series_name: str):
+    """Ejecuta el modelo Prophet y muestra las predicciones para los próximos 6 meses."""
+    if df.empty:
+        st.warning("No data available for Prophet model. Please verify the file or keyword.")
+        st.stop()
+
+    if series_name not in df.columns:
+        st.error(f"Column '{series_name}' not found in the dataset.")
+        st.stop()
+
+    with st.spinner("Running Prophet model…"):
+        forecast, fig = run_prophet_model(df, series_name, months_ahead=6)
+
+    st.plotly_chart(fig, use_container_width=True)
+    st.markdown("### Predicciones del modelo Prophet para los próximos 6 meses:")
+    st.dataframe(forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']], use_container_width=True)
+
+    st.download_button(
+        "Download Prophet Forecast CSV",
+        forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].to_csv(index=False).encode("utf-8"),
+        file_name=f"prophet_forecast_{series_name.strip().replace(' ','_')}.csv",
+        mime="text/csv"
+    )
