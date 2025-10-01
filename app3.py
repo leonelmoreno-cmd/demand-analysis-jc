@@ -1,7 +1,7 @@
 #!/usr/bin/env python
 # coding: utf-8
 
-# Demand Analysis JC — Google Trends + STL (LOESS)
+# Demand Analysis JC — Google Trends + STL (LOESS) + Prophet
 # Fixed scope: US, last 5 years, en-US
 # Best practices: retries/backoff, caching, validation, structured error messages.
 
@@ -33,10 +33,13 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.express as px
 
+# Importar el modelo Prophet
+from prophet_model import run_prophet_model
+
 # ---------- Streamlit basic setup ----------
 st.set_page_config(page_title="Demand Analysis JC", layout="wide")
 st.title("Demand Analysis JC")
-st.caption("Google Trends (US, last 5y, en-US) → STL (LOESS) → Plotly → Better decisions")
+st.caption("Google Trends (US, last 5y, en-US) → STL (LOESS) → Prophet → Plotly → Better decisions")
 
 # ---------- UI inputs ----------
 kw = st.text_input("Keyword (required for Request mode)", value="", placeholder="e.g., rocket stove")
@@ -116,30 +119,22 @@ def _looks_like_header(cols: list[str]) -> bool:
 
 def _detect_delimiter(sample: str) -> str:
     """Detect delimiter via pandas engine='python' or simple heuristics."""
-    # Favor pandas' automatic detection by using sep=None; this helper kept for clarity
     return None  # type: ignore
 
 def _clean_keyword_label(raw: str) -> str:
     """Normalize series label like 'beef tallow for skin: (Estados Unidos)' -> 'beef tallow for skin (United States/Estados Unidos)' without trailing colon artifacts."""
     label = raw.strip()
-    # Remove duplicate spaces and trailing colon
     label = re.sub(r":\s*$", "", label)
-    # Replace ':\s*(' with ' ('
     label = re.sub(r":\s*\(", " (", label)
     return label
 
 def parse_trends_csv(file_bytes: bytes) -> tuple[pd.DataFrame, str]:
-    """
-    Parse a Google Trends CSV (en or es).
-    Returns (df, series_label) where df has a DatetimeIndex and a single numeric column.
-    """
+    """Parse a Google Trends CSV (en or es)."""
     text = file_bytes.decode("utf-8-sig", errors="replace")
-    # Find the header line by scanning until we see a row whose first cell is Week/Semana/Date/Fecha
     lines = [ln for ln in text.splitlines() if ln.strip() != ""]
     header_idx = -1
     split_cache = []
     for i, ln in enumerate(lines):
-        # Try commas first; if only one col, try semicolon and tab
         for sep in [",", ";", "\t"]:
             parts = [p.strip() for p in ln.split(sep)]
             if len(parts) >= 2:
@@ -154,23 +149,18 @@ def parse_trends_csv(file_bytes: bytes) -> tuple[pd.DataFrame, str]:
     if header_idx == -1:
         raise ValueError("Could not locate a header row (expected columns like Week/Semana/Date/Fecha).")
 
-    # Rebuild the CSV from header onward and let pandas parse
     content = "\n".join(lines[header_idx:])
-    # Use engine='python' and sep=None to let pandas sniff mixed delimiters robustly
     df_raw = pd.read_csv(io.StringIO(content), sep=None, engine="python")
 
-    # Identify date column name (en/es)
     date_candidates = [c for c in df_raw.columns if c.strip().lower() in {"week", "semana", "date", "fecha"}]
     if not date_candidates:
         raise ValueError("Date column not found (looking for Week/Semana/Date/Fecha).")
     date_col = date_candidates[0]
 
-    # Identify the keyword series column: the one that isn't the date
     value_cols = [c for c in df_raw.columns if c != date_col]
     if not value_cols:
         raise ValueError("Value column not found (expected a keyword like 'beef tallow for skin: (United States)').")
 
-    # If multiple columns exist, take the first non-empty numeric-like column
     chosen = None
     for col in value_cols:
         non_na = pd.to_numeric(df_raw[col], errors="coerce")
@@ -178,21 +168,16 @@ def parse_trends_csv(file_bytes: bytes) -> tuple[pd.DataFrame, str]:
             chosen = col
             break
     if chosen is None:
-        # Fallback: take the first value column
         chosen = value_cols[0]
 
     series_label = _clean_keyword_label(str(chosen))
 
-    # Build normalized dataframe
     df = pd.DataFrame({
         "date": pd.to_datetime(df_raw[date_col], errors="coerce"),
         series_label: pd.to_numeric(df_raw[chosen], errors="coerce"),
     }).dropna(subset=["date"]).sort_values("date")
 
-    # Some exports may contain future/partial last rows; drop trailing NaN or duplicates
     df = df.dropna(subset=[series_label])
-
-    # Use date as index to match fetch_trends() shape
     df = df.set_index("date")
 
     return df, series_label
@@ -214,14 +199,12 @@ def run_stl_pipeline(df: pd.DataFrame, series_name: str):
 
     period = infer_period(y.index)
 
-    # STL (LOESS)
     try:
         res = STL(y, period=period, robust=True).fit()
     except Exception as e:
         st.error(f"STL decomposition failed: {e}")
         st.stop()
 
-    # Build dataframe for plotting and CSV export
     df_plot = pd.DataFrame({
         "date": y.index,
         "original": y.values,
@@ -230,7 +213,6 @@ def run_stl_pipeline(df: pd.DataFrame, series_name: str):
         "remainder": res.resid
     })
 
-    # ---- Main decomposition figure ----
     fig = build_figure(df_plot, series_name)
     st.plotly_chart(fig, use_container_width=True)
     st.markdown(
@@ -247,93 +229,29 @@ def run_stl_pipeline(df: pd.DataFrame, series_name: str):
             mime="text/csv"
         )
 
-    # =========================
-    # Additional analyses
-    # =========================
-    st.markdown("## Additional seasonal analyses")
+# ---------- Nueva Sección de Predicción Prophet ----------
+def run_prophet_forecast(df: pd.DataFrame, series_name: str):
+    """Ejecuta el modelo Prophet y muestra las predicciones para los próximos 6 meses."""
+    if df.empty:
+        st.warning("No data available for Prophet model. Please verify the file or keyword.")
+        st.stop()
 
-    # ---- Chart 2: Average seasonal pattern by ISO week ----
-    semana_mean = (
-        df_plot.assign(iso_week=df_plot["date"].dt.isocalendar().week.astype(int))
-               .groupby("iso_week", as_index=False)["seasonal"].mean()
-               .rename(columns={"seasonal": "mean_seasonal"})
-               .sort_values("iso_week")
-               .reset_index(drop=True)
-    )
-    fig_week = px.line(
-        semana_mean, x="iso_week", y="mean_seasonal",
-        title="Average seasonal pattern by ISO week (1–53)"
-    )
-    fig_week.add_hline(y=0, line_dash="dash", line_color="gray")
-    fig_week.update_xaxes(dtick=4, title="ISO week (1–53)")
-    fig_week.update_yaxes(title="Seasonal value")
-    st.plotly_chart(fig_week, use_container_width=True)
-    st.markdown(
-        "*Interpretation:* this line shows the **average seasonal effect** at each ISO week across all years. "
-        "Peaks indicate weeks that are typically above the baseline; troughs indicate below-baseline weeks."
-    )
+    if series_name not in df.columns:
+        st.error(f"Column '{series_name}' not found in the dataset.")
+        st.stop()
 
-    # ---- Chart 3: Average seasonal pattern by month ----
-    month_labels = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"]
-    month_map = dict(zip(range(1, 13), month_labels))
-    mes_mean = (
-        df_plot.assign(month_num=df_plot["date"].dt.month)
-               .groupby("month_num", as_index=False)["seasonal"].mean()
-               .rename(columns={"seasonal": "mean_seasonal"})
-    )
-    mes_mean["month_lab"] = mes_mean["month_num"].map(month_map)
-    fig_month_mean = px.line(
-        mes_mean, x="month_lab", y="mean_seasonal", markers=True,
-        title="Average seasonal pattern by month"
-    )
-    fig_month_mean.add_hline(y=0, line_dash="dash", line_color="gray")
-    fig_month_mean.update_xaxes(title="Month")
-    fig_month_mean.update_yaxes(title="Seasonal value")
-    st.plotly_chart(fig_month_mean, use_container_width=True)
-    st.markdown(
-        "*Interpretation:* this summarizes the **typical monthly seasonality**. "
-        "Use it to spot which months are usually stronger or weaker relative to the yearly baseline."
-    )
+    with st.spinner("Running Prophet model…"):
+        forecast, fig = run_prophet_model(df, series_name, months_ahead=6)
 
-    # ---- Chart 4: Seasonal distribution by month (box plot) ----
-    df_box = df_plot.assign(
-        month_num=df_plot["date"].dt.month,
-        month_lab=lambda d: d["month_num"].map(month_map)
-    )
-    fig_box = px.box(
-        df_box, x="month_lab", y="seasonal",
-        title="Seasonal distribution by month"
-    )
-    fig_box.add_hline(y=0, line_dash="dash", line_color="gray")
-    fig_box.update_xaxes(title="Month")
-    fig_box.update_yaxes(title="Seasonal value")
-    st.plotly_chart(fig_box, use_container_width=True)
-    st.markdown(
-        "*Interpretation:* boxes show the **spread of seasonal values** for each month across years. "
-        "Wider boxes or longer whiskers mean more variability; outliers capture unusual months."
-    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.markdown("### Predicciones del modelo Prophet para los próximos 6 meses:")
+    st.dataframe(forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']], use_container_width=True)
 
-    # ---- Chart 5: Year-over-year seasonality comparison (last 3–4 years) ----
-    df_plot = df_plot.copy()
-    df_plot["year"] = df_plot["date"].dt.year
-    df_plot["iso_week"] = df_plot["date"].dt.isocalendar().week.astype(int)
-
-    max_year = int(df_plot["year"].max())
-    start_year = max(max_year - 3, int(df_plot["year"].min()))
-    df_last_years = df_plot.query("@start_year <= year <= @max_year").copy()
-
-    fig_yoy = px.line(
-        df_last_years, x="iso_week", y="seasonal", color="year",
-        title=f"Seasonality compared by year (from {start_year} to {max_year})",
-        markers=False
-    )
-    fig_yoy.add_hline(y=0, line_dash="dash", line_color="gray")
-    fig_yoy.update_xaxes(title="ISO week", dtick=4)
-    fig_yoy.update_yaxes(title="Seasonal value")
-    st.plotly_chart(fig_yoy, use_container_width=True)
-    st.markdown(
-        "*Interpretation:* this compares **seasonal curves across recent years** on the same ISO-week axis. "
-        "Look for alignment (stable seasonality) or divergences (shifts in timing or magnitude)."
+    st.download_button(
+        "Download Prophet Forecast CSV",
+        forecast[['ds', 'yhat', 'yhat_lower', 'yhat_upper']].to_csv(index=False).encode("utf-8"),
+        file_name=f"prophet_forecast_{series_name.strip().replace(' ','_')}.csv",
+        mime="text/csv"
     )
 
 # ---------- Execution controllers ----------
@@ -352,7 +270,6 @@ def run_request_mode():
         st.warning("No data returned by Google Trends for this keyword/timeframe/geo.")
         st.stop()
 
-    # Series selection follows the exact column typed by user
     col_name = kw.strip()
     if col_name not in df.columns:
         st.error(f"Column '{col_name}' not found in Trends result.")
@@ -372,20 +289,25 @@ def run_upload_mode():
         st.error(f"Failed to parse CSV: {e}")
         st.stop()
 
-    # For display, keep the label from the CSV header (keyword + country)
     run_stl_pipeline(df_csv, series_label)
+
+# Botón para ejecutar la predicción Prophet
+col_prophet = st.column(2)
+prophet_clicked = col_prophet.button("Run Prophet Forecast")
 
 # Trigger actions
 if request_clicked:
     run_request_mode()
 elif upload_clicked:
     run_upload_mode()
+elif prophet_clicked:
+    run_prophet_forecast(df, series_name)
 
 # ---------- Footer ----------
 st.markdown(
     """
     <small>
-    Data source: Google Trends via <code>pytrends</code> • Decomposition: <code>statsmodels.STL</code> • Charts: Plotly • Host: Streamlit Community Cloud
+    Data source: Google Trends via <code>pytrends</code> • Decomposition: <code>statsmodels.STL</code> • Prophet: <code>fbprophet</code> • Charts: Plotly • Host: Streamlit Community Cloud
     </small>
     """, unsafe_allow_html=True
 )
