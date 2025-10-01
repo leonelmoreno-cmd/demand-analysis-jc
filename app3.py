@@ -295,6 +295,9 @@ def run_upload_mode():
 
     run_stl_pipeline(df_csv, series_label)
 
+    # Ejecutar el modelo Prophet automáticamente después de STL
+    run_prophet_forecast(df_csv, series_label)
+
 # Trigger actions
 if request_clicked:
     run_request_mode()
