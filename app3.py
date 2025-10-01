@@ -292,7 +292,7 @@ def run_upload_mode():
     run_stl_pipeline(df_csv, series_label)
 
 # Botón para ejecutar la predicción Prophet
-col_prophet = st.column(2)
+col_prophet = st.columns(2)[1] 
 prophet_clicked = col_prophet.button("Run Prophet Forecast")
 
 # Trigger actions
