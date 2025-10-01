@@ -275,7 +275,11 @@ def run_request_mode():
         st.error(f"Column '{col_name}' not found in Trends result.")
         st.stop()
 
+    # Ejecutar el análisis STL
     run_stl_pipeline(df, col_name)
+
+    # Ejecutar el modelo Prophet automáticamente después de STL
+    run_prophet_forecast(df, col_name)
 
 def run_upload_mode():
     if uploaded_file is None:
@@ -291,17 +295,11 @@ def run_upload_mode():
 
     run_stl_pipeline(df_csv, series_label)
 
-# Botón para ejecutar la predicción Prophet
-col_prophet = st.columns(2)[1] 
-prophet_clicked = col_prophet.button("Run Prophet Forecast")
-
 # Trigger actions
 if request_clicked:
     run_request_mode()
 elif upload_clicked:
     run_upload_mode()
-elif prophet_clicked:
-    run_prophet_forecast(df, series_name)
 
 # ---------- Footer ----------
 st.markdown(
