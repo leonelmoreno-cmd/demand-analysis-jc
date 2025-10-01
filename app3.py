@@ -389,7 +389,7 @@ elif upload_clicked:
 st.markdown(
     """
     <small>
-    Data source: Google Trends via <code>pytrends</code> • Decomposition: <code>statsmodels.STL</code> • Prophet: <code>fbprophet</code> • Charts: Plotly • Host: Streamlit Community Cloud
+    Data source: Google Trends -via <code>pytrends</code> • Decomposition: <code>statsmodels.STL</code> • Prophet: <code>fbprophet</code> • Charts: Plotly • Host: Streamlit Community Cloud
     </small>
     """, unsafe_allow_html=True
 )
