@@ -9,11 +9,21 @@ def run_prophet_model(df: pd.DataFrame, series_name: str, months_ahead: int = 6)
     """
     Run Prophet model with holidays added for USA and forecast for the next 'months_ahead' months.
     """
+    # Find the column name that represents the date, it could be 'date', 'Week', 'fecha', etc.
+    date_column = None
+    for col in df.columns:
+        if 'date' in col.lower() or 'week' in col.lower() or 'fecha' in col.lower():
+            date_column = col
+            break
+    
+    if date_column is None:
+        raise ValueError("No date column found in the dataset. Please ensure it is named 'date', 'Week', or similar.")
+    
     # Prepare data for Prophet
-    df_prophet = df.reset_index()[['date', series_name]].rename(columns={'date': 'ds', series_name: 'y'})
+    df_prophet = df.reset_index()[[date_column, series_name]].rename(columns={date_column: 'ds', series_name: 'y'})
 
     # Create a holidays dataframe (USA holidays)
-    holidays = make_holidays_df(year_list=[df['date'].dt.year.min(), df['date'].dt.year.max()], country='US')
+    holidays = make_holidays_df(year_list=[df['ds'].dt.year.min(), df['ds'].dt.year.max()], country='US')
 
     # Initialize and fit the Prophet model
     model = Prophet(holidays=holidays, yearly_seasonality=True, weekly_seasonality=True)
@@ -27,7 +37,7 @@ def run_prophet_model(df: pd.DataFrame, series_name: str, months_ahead: int = 6)
     fig = go.Figure()
 
     # Actual data
-    fig.add_trace(go.Scatter(x=df['date'], y=df[series_name], name='Actual Data', mode='lines'))
+    fig.add_trace(go.Scatter(x=df['ds'], y=df[series_name], name='Actual Data', mode='lines'))
 
     # Forecasted data
     fig.add_trace(go.Scatter(x=forecast['ds'], y=forecast['yhat'], name='Predicted Data', mode='lines'))
