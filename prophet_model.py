@@ -7,7 +7,7 @@ import plotly.graph_objects as go
 
 def run_prophet_model(df: pd.DataFrame, series_name: str, months_ahead: int = 6):
     """
-    Run Prophet model with holidays added for USA and forecast for the next 'months_ahead' months.
+    Run Prophets model with holidays added for USA and forecast for the next 'months_ahead' months.
     """
     # Find the column name that represents the date, it could be 'date', 'Week', 'fecha', etc.
     date_column = None
