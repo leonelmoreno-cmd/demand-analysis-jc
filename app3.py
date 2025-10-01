@@ -33,13 +33,10 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import plotly.express as px
 
-# Importar el modelo Prophet
-from prophet_model import run_prophet_model  # Importamos la función de Prophet
-
 # ---------- Streamlit basic setup ----------
 st.set_page_config(page_title="Demand Analysis JC", layout="wide")
 st.title("Demand Analysis JC")
-st.caption("Google Trends (US, last 5y, en-US) → STL (LOESS) → Prophet → Plotly → Better decisions")
+st.caption("Google Trends (US, last 5y, en-US) → STL (LOESS) → Plotly → Better decisions")
 
 # ---------- UI inputs ----------
 kw = st.text_input("Keyword (required for Request mode)", value="", placeholder="e.g., rocket stove")
@@ -132,7 +129,10 @@ def _clean_keyword_label(raw: str) -> str:
     return label
 
 def parse_trends_csv(file_bytes: bytes) -> tuple[pd.DataFrame, str]:
-    """Parse a Google Trends CSV (en or es)."""
+    """
+    Parse a Google Trends CSV (en or es).
+    Returns (df, series_label) where df has a DatetimeIndex and a single numeric column.
+    """
     text = file_bytes.decode("utf-8-sig", errors="replace")
     # Find the header line by scanning until we see a row whose first cell is Week/Semana/Date/Fecha
     lines = [ln for ln in text.splitlines() if ln.strip() != ""]
@@ -178,6 +178,7 @@ def parse_trends_csv(file_bytes: bytes) -> tuple[pd.DataFrame, str]:
             chosen = col
             break
     if chosen is None:
+        # Fallback: take the first value column
         chosen = value_cols[0]
 
     series_label = _clean_keyword_label(str(chosen))
@@ -359,9 +360,6 @@ def run_request_mode():
 
     run_stl_pipeline(df, col_name)
 
-    # Ejecutar el modelo Prophet automáticamente después de STL
-    run_prophet_forecast(df, col_name)  # Llamamos a Prophet
-
 def run_upload_mode():
     if uploaded_file is None:
         st.error("Please choose a CSV file exported from Google Trends.")
@@ -374,10 +372,8 @@ def run_upload_mode():
         st.error(f"Failed to parse CSV: {e}")
         st.stop()
 
+    # For display, keep the label from the CSV header (keyword + country)
     run_stl_pipeline(df_csv, series_label)
-
-    # Ejecutar el modelo Prophet automáticamente después de STL
-    run_prophet_forecast(df_csv, series_label)  # Llamamos a Prophet
 
 # Trigger actions
 if request_clicked:
@@ -389,7 +385,7 @@ elif upload_clicked:
 st.markdown(
     """
     <small>
-    Data source: Google Trends -via <code>pytrends</code> • Decomposition: <code>statsmodels.STL</code> • Prophet: <code>fbprophet</code> • Charts: Plotly • Host: Streamlit Community Cloud
+    Data source: Google Trends via <code>pytrends</code> • Decomposition: <code>statsmodels.STL</code> • Charts: Plotly • Host: Streamlit Community Cloud
     </small>
     """, unsafe_allow_html=True
 )
