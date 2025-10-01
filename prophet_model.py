@@ -9,7 +9,7 @@ def run_prophet_model(df: pd.DataFrame, series_name: str, months_ahead: int = 6)
     """
     Run Prophet model with holidays added for USA and forecast for the next 'months_ahead' months.
     """
-    # Prepare data for Prophet
+    # Prepare data for Prophets
     df_prophet = df.reset_index()[['date', series_name]].rename(columns={'date': 'ds', series_name: 'y'})
 
     # Create a holidays dataframe (USA holidays)
